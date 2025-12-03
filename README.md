@@ -12,6 +12,31 @@ This is the **open-source SQL security layer** that AnomalyArmor uses to control
 
 ## What does it do?
 
+```
+                              ┌─────────────────────────────────┐
+                              │     Your Database               │
+                              │  ┌───────────────────────────┐  │
+                              │  │  users   │  orders  │ ... │  │
+                              │  └───────────────────────────┘  │
+                              └────────────────▲────────────────┘
+                                               │
+                                               │ BLOCKED or ALLOWED
+                                               │
+┌──────────────────────────────────────────────┴───────────────────────────────┐
+│                         Query Security Gateway                                │
+│  ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────────────┐   │
+│  │   SQL Parser    │ -> │ Access Validator │ -> │  Allow / Block + Log   │   │
+│  │   (sqlglot)     │    │  (level rules)   │    │  (audit trail)         │   │
+│  └─────────────────┘    └─────────────────┘    └─────────────────────────┘   │
+└──────────────────────────────────────────────────────────────────────────────┘
+                                               ▲
+                                               │
+                              ┌────────────────┴────────────────┐
+                              │      AnomalyArmor Platform      │
+                              │   (freshness, tags, insights)   │
+                              └─────────────────────────────────┘
+```
+
 Validates SQL queries against three access levels:
 
 | Level | What We Can Query | What We Cannot Query |
