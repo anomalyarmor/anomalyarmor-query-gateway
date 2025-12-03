@@ -1,6 +1,39 @@
 # AnomalyArmor Query Gateway
 
-A SQL query security gateway for validating database queries against customer-configured access levels.
+[![Tests](https://github.com/anomalyarmor/anomalyarmor-query-gateway/actions/workflows/ci.yml/badge.svg)](https://github.com/anomalyarmor/anomalyarmor-query-gateway/actions/workflows/ci.yml)
+[![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
+[![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
+
+## What is this?
+
+This is the **open-source SQL security layer** that AnomalyArmor uses to control access to customer databases. Every query we execute against your database passes through this gateway.
+
+**Why open source?** So you can verify exactly what queries we can and cannot run. No black boxes.
+
+## What does it do?
+
+Validates SQL queries against three access levels:
+
+| Level | What We Can Query | What We Cannot Query |
+|-------|-------------------|----------------------|
+| **Schema Only** | Table names, column types, indexes | Any actual data |
+| **Aggregates** | `COUNT(*)`, `AVG(salary)`, `MAX(date)` | `SELECT email FROM users` |
+| **Full** | Any SELECT query | - |
+
+The gateway parses your SQL using [sqlglot](https://github.com/tobymao/sqlglot) and blocks queries that violate the configured access level. **If parsing fails, the query is blocked** (fail-closed).
+
+## How do we know it works?
+
+**97 tests** covering access level enforcement, SQL parsing, and security edge cases.
+
+See [TEST_RESULTS.md](TEST_RESULTS.md) for the full breakdown, or run them yourself:
+
+```bash
+pip install -e ".[dev]"
+pytest -v
+```
+
+---
 
 ## Overview
 
