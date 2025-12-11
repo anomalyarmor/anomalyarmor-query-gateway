@@ -3,9 +3,12 @@
 Validates parsed queries against the configured access level rules.
 """
 
+import sqlglot
+from sqlglot import exp
+
 from .access_levels import AccessLevel
 from .dialects import BaseDialectRules, get_dialect_rules
-from .parser import ParsedQuery, SQLParser
+from .parser import DATA_EXPOSING_AGGREGATES, ParsedQuery, SQLParser
 from .result import ValidationResult
 
 
@@ -123,11 +126,13 @@ class AccessValidator:
 
         AGGREGATES allows:
         - Any query against system tables (schema_only subset)
-        - Queries with only aggregate functions (no raw column values)
+        - Queries with only safe aggregate functions (no raw column values)
 
         Blocks:
         - Raw column references in SELECT
         - Window functions (can expose row-level data)
+        - Data-exposing aggregates (array_agg, string_agg, json_agg, any_value, etc.)
+        - Subqueries that could expose raw data
 
         Args:
             parsed: Parsed query.
@@ -164,6 +169,24 @@ class AccessValidator:
                 },
             )
 
+        # Data-exposing aggregates (array_agg, string_agg, json_agg, any_value, etc.)
+        # return actual row data rather than computed statistics
+        if parsed.has_data_exposing_aggregates:
+            examples = ", ".join(sorted(DATA_EXPOSING_AGGREGATES)[:5]) + ", etc."
+            return ValidationResult.deny(
+                reason=(
+                    "Data-exposing aggregate functions are not permitted at aggregates level "
+                    f"because they return actual row data. Blocked functions include: {examples}. "
+                    "Use statistical aggregates (COUNT, SUM, AVG, MIN, MAX) instead."
+                ),
+                required_level=AccessLevel.FULL,
+                details={
+                    "access_level": "aggregates",
+                    "blocked_reason": "data_exposing_aggregates",
+                    "tables": parsed.tables,
+                },
+            )
+
         # Check for raw columns in SELECT
         if parsed.has_raw_columns:
             return ValidationResult.deny(
@@ -182,13 +205,11 @@ class AccessValidator:
                 },
             )
 
-        # Validate subqueries recursively
+        # Recursively validate subqueries and CTEs
         if parsed.has_subqueries or parsed.has_ctes:
-            # For complex queries with subqueries/CTEs, we need to be conservative.
-            # The parser detected these but detailed validation would require
-            # re-parsing each subquery. For now, allow if main query looks clean.
-            # Note: In production, you might want to add recursive validation.
-            pass
+            subquery_result = self._validate_subqueries(parsed)
+            if not subquery_result.allowed:
+                return subquery_result
 
         # Validate UNION parts (already analyzed in parser)
         if parsed.has_unions:
@@ -205,3 +226,150 @@ class AccessValidator:
                 "has_ctes": parsed.has_ctes,
             }
         )
+
+    def _validate_subqueries(self, parsed: ParsedQuery) -> ValidationResult:
+        """Recursively validate subqueries and CTEs for AGGREGATES level.
+
+        Subqueries that filter to a single row (via WHERE, LIMIT, etc.) combined
+        with MIN/MAX can be used to extract specific row values. This method
+        blocks subqueries that could expose raw data.
+
+        Args:
+            parsed: Parsed query containing subqueries/CTEs.
+
+        Returns:
+            ValidationResult indicating if subqueries are safe.
+        """
+        try:
+            ast = sqlglot.parse_one(
+                self._parser._strip_comments(parsed.original),
+                dialect=self._parser._sqlglot_dialect,
+            )
+        except Exception:
+            # If we can't re-parse, be conservative and block
+            return ValidationResult.deny(
+                reason="Unable to validate subquery structure for aggregate access level.",
+                required_level=AccessLevel.FULL,
+                details={
+                    "access_level": "aggregates",
+                    "blocked_reason": "subquery_parse_error",
+                },
+            )
+
+        # Find all subqueries and CTEs
+        subqueries = list(ast.find_all(exp.Subquery))
+        ctes = list(ast.find_all(exp.CTE))
+
+        # Check each subquery
+        for subquery in subqueries:
+            # Get the SELECT inside the subquery
+            select = subquery.find(exp.Select)
+            if select is None:
+                continue
+
+            # Parse the subquery as a standalone query
+            subquery_sql = select.sql(dialect=self._parser._sqlglot_dialect)
+            try:
+                subquery_parsed = self._parser.parse(subquery_sql)
+            except Exception:
+                # If we can't parse the subquery, be conservative
+                return ValidationResult.deny(
+                    reason="Unable to validate nested subquery for aggregate access level.",
+                    required_level=AccessLevel.FULL,
+                    details={
+                        "access_level": "aggregates",
+                        "blocked_reason": "nested_subquery_parse_error",
+                    },
+                )
+
+            # Check if subquery has raw columns (would expose data)
+            if subquery_parsed.has_raw_columns:
+                return ValidationResult.deny(
+                    reason=(
+                        "Subquery contains raw column values which could expose row-level data. "
+                        "At aggregates level, subqueries must also use only aggregate functions."
+                    ),
+                    required_level=AccessLevel.FULL,
+                    details={
+                        "access_level": "aggregates",
+                        "blocked_reason": "subquery_raw_columns",
+                        "tables": parsed.tables,
+                    },
+                )
+
+            # Check if subquery has data-exposing aggregates
+            if subquery_parsed.has_data_exposing_aggregates:
+                return ValidationResult.deny(
+                    reason=(
+                        "Subquery contains data-exposing aggregate functions. "
+                        "At aggregates level, use only statistical aggregates."
+                    ),
+                    required_level=AccessLevel.FULL,
+                    details={
+                        "access_level": "aggregates",
+                        "blocked_reason": "subquery_data_exposing_aggregates",
+                        "tables": parsed.tables,
+                    },
+                )
+
+            # Recursively validate nested subqueries within this subquery
+            if subquery_parsed.has_subqueries or subquery_parsed.has_ctes:
+                nested_result = self._validate_subqueries(subquery_parsed)
+                if not nested_result.allowed:
+                    return nested_result
+
+        # Check each CTE
+        for cte in ctes:
+            cte_select = cte.find(exp.Select)
+            if cte_select is None:
+                continue
+
+            cte_sql = cte_select.sql(dialect=self._parser._sqlglot_dialect)
+            try:
+                cte_parsed = self._parser.parse(cte_sql)
+            except Exception:
+                return ValidationResult.deny(
+                    reason="Unable to validate CTE for aggregate access level.",
+                    required_level=AccessLevel.FULL,
+                    details={
+                        "access_level": "aggregates",
+                        "blocked_reason": "cte_parse_error",
+                    },
+                )
+
+            if cte_parsed.has_raw_columns:
+                return ValidationResult.deny(
+                    reason=(
+                        "CTE contains raw column values which could expose row-level data. "
+                        "At aggregates level, CTEs must also use only aggregate functions."
+                    ),
+                    required_level=AccessLevel.FULL,
+                    details={
+                        "access_level": "aggregates",
+                        "blocked_reason": "cte_raw_columns",
+                        "tables": parsed.tables,
+                    },
+                )
+
+            if cte_parsed.has_data_exposing_aggregates:
+                return ValidationResult.deny(
+                    reason=(
+                        "CTE contains data-exposing aggregate functions. "
+                        "At aggregates level, use only statistical aggregates."
+                    ),
+                    required_level=AccessLevel.FULL,
+                    details={
+                        "access_level": "aggregates",
+                        "blocked_reason": "cte_data_exposing_aggregates",
+                        "tables": parsed.tables,
+                    },
+                )
+
+            # Recursively validate nested subqueries within this CTE
+            if cte_parsed.has_subqueries or cte_parsed.has_ctes:
+                nested_result = self._validate_subqueries(cte_parsed)
+                if not nested_result.allowed:
+                    return nested_result
+
+        # All subqueries and CTEs are safe
+        return ValidationResult.allow()
