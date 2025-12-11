@@ -403,10 +403,9 @@ class SQLParser:
             # Convert class name to snake_case for matching (e.g., ArrayAgg -> array_agg)
             if not agg_name:
                 class_name = agg.__class__.__name__
-                # Convert PascalCase to snake_case
-                agg_name = "".join(
-                    f"_{c.lower()}" if c.isupper() else c for c in class_name
-                ).lstrip("_")
+                # Convert PascalCase to snake_case using regex
+                # Insert underscore before uppercase letters that follow lowercase letters
+                agg_name = re.sub(r"(?<=[a-z])(?=[A-Z])", "_", class_name).lower()
             if agg_name.lower() in DATA_EXPOSING_AGGREGATES:
                 return True
 

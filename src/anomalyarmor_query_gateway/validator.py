@@ -3,6 +3,9 @@
 Validates parsed queries against the configured access level rules.
 """
 
+import sqlglot
+from sqlglot import exp
+
 from .access_levels import AccessLevel
 from .dialects import BaseDialectRules, get_dialect_rules
 from .parser import DATA_EXPOSING_AGGREGATES, ParsedQuery, SQLParser
@@ -237,9 +240,6 @@ class AccessValidator:
         Returns:
             ValidationResult indicating if subqueries are safe.
         """
-        import sqlglot
-        from sqlglot import exp
-
         try:
             ast = sqlglot.parse_one(
                 self._parser._strip_comments(parsed.original),
@@ -312,6 +312,12 @@ class AccessValidator:
                     },
                 )
 
+            # Recursively validate nested subqueries within this subquery
+            if subquery_parsed.has_subqueries or subquery_parsed.has_ctes:
+                nested_result = self._validate_subqueries(subquery_parsed)
+                if not nested_result.allowed:
+                    return nested_result
+
         # Check each CTE
         for cte in ctes:
             cte_select = cte.find(exp.Select)
@@ -358,6 +364,12 @@ class AccessValidator:
                         "tables": parsed.tables,
                     },
                 )
+
+            # Recursively validate nested subqueries within this CTE
+            if cte_parsed.has_subqueries or cte_parsed.has_ctes:
+                nested_result = self._validate_subqueries(cte_parsed)
+                if not nested_result.allowed:
+                    return nested_result
 
         # All subqueries and CTEs are safe
         return ValidationResult.allow()

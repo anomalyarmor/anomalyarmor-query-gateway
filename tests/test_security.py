@@ -252,6 +252,31 @@ class TestSubqueryDataExtraction:
         )
         assert not result.allowed
 
+    def test_nested_subquery_with_raw_columns_blocked(
+        self, gateway: QuerySecurityGateway
+    ) -> None:
+        """Test that deeply nested subqueries with raw columns are blocked."""
+        result = gateway.validate_query_sync(
+            "SELECT COUNT(*) FROM ("
+            "  SELECT cnt FROM ("
+            "    SELECT email, COUNT(*) as cnt FROM users GROUP BY email"
+            "  ) inner_sub"
+            ") outer_sub"
+        )
+        # The innermost subquery exposes 'email' raw column
+        assert not result.allowed
+
+    def test_mixed_safe_and_data_exposing_aggregates_blocked(
+        self, gateway: QuerySecurityGateway
+    ) -> None:
+        """Test that mixing safe and data-exposing aggregates is blocked."""
+        result = gateway.validate_query_sync(
+            "SELECT COUNT(*), array_agg(email) FROM users"
+        )
+        # Even though COUNT is safe, array_agg exposes data
+        assert not result.allowed
+        assert "data-exposing" in (result.reason or "").lower()
+
 
 class TestWindowFunctionBlocking:
     """Tests for window function detection and blocking."""
