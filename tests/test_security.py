@@ -164,9 +164,7 @@ class TestDataExposingAggregates:
 
     def test_string_agg_blocked(self, gateway: QuerySecurityGateway) -> None:
         """Test that string_agg is blocked - returns concatenated row values."""
-        result = gateway.validate_query_sync(
-            "SELECT string_agg(email, ',') FROM users"
-        )
+        result = gateway.validate_query_sync("SELECT string_agg(email, ',') FROM users")
         assert not result.allowed
 
     def test_json_agg_blocked(self, gateway: QuerySecurityGateway) -> None:
@@ -243,9 +241,7 @@ class TestSubqueryDataExtraction:
         )
         assert not result.allowed
 
-    def test_binary_search_attack_blocked(
-        self, gateway: QuerySecurityGateway
-    ) -> None:
+    def test_binary_search_attack_blocked(self, gateway: QuerySecurityGateway) -> None:
         """Test that binary search data extraction is blocked."""
         result = gateway.validate_query_sync(
             "SELECT MIN(ssn) FROM (SELECT ssn FROM employees WHERE ssn > '500-00-0000') sub"

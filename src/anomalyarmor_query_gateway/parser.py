@@ -239,7 +239,9 @@ class SQLParser:
             result.select_expressions = list(ast.expressions)
             result.has_aggregates = self._has_aggregates(ast)
             result.has_raw_columns = self._has_raw_columns(ast)
-            result.has_data_exposing_aggregates = self._has_data_exposing_aggregates(ast)
+            result.has_data_exposing_aggregates = self._has_data_exposing_aggregates(
+                ast
+            )
 
         return result
 
