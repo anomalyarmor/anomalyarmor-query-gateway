@@ -20,18 +20,14 @@ if TYPE_CHECKING:
     pass
 
 
-# Aggregate function names (lowercase)
-AGGREGATE_FUNCTIONS = frozenset(
+# Safe aggregate functions that return computed statistical values (not raw data)
+SAFE_AGGREGATE_FUNCTIONS = frozenset(
     {
         "count",
         "sum",
         "avg",
         "min",
         "max",
-        "group_concat",
-        "array_agg",
-        "string_agg",
-        "listagg",
         "stddev",
         "variance",
         "var_pop",
@@ -45,9 +41,6 @@ AGGREGATE_FUNCTIONS = frozenset(
         "percentile_disc",
         "median",
         "mode",
-        "any_value",
-        "first_value",  # Can be aggregate in some contexts
-        "last_value",  # Can be aggregate in some contexts
         "approx_count_distinct",
         "approx_percentile",
         "bit_and",
@@ -56,14 +49,34 @@ AGGREGATE_FUNCTIONS = frozenset(
         "bool_and",
         "bool_or",
         "every",
+    }
+)
+
+# Data-exposing aggregate functions that return actual row values
+# These are technically aggregates but expose raw data and should be blocked
+# at AGGREGATES access level. They include:
+# - Collection aggregates: array_agg, string_agg, json_agg, etc.
+# - Arbitrary value selectors: any_value, first_value, last_value
+DATA_EXPOSING_AGGREGATES = frozenset(
+    {
+        "array_agg",
+        "string_agg",
+        "group_concat",
+        "listagg",
         "json_agg",
         "jsonb_agg",
         "json_object_agg",
         "jsonb_object_agg",
         "collect_list",
         "collect_set",
+        "any_value",
+        "first_value",
+        "last_value",
     }
 )
+
+# All aggregate functions (union of safe and data-exposing)
+AGGREGATE_FUNCTIONS = SAFE_AGGREGATE_FUNCTIONS | DATA_EXPOSING_AGGREGATES
 
 
 @dataclass
@@ -79,6 +92,8 @@ class ParsedQuery:
         tables: List of tables referenced (fully qualified where available).
         has_aggregates: Whether SELECT contains aggregate functions.
         has_raw_columns: Whether SELECT contains raw column references.
+        has_data_exposing_aggregates: Whether query uses data-exposing aggregates
+            (array_agg, string_agg, json_agg, any_value, etc.) that return raw data.
         has_subqueries: Whether query contains subqueries.
         has_ctes: Whether query contains CTEs (WITH clauses).
         has_window_functions: Whether query contains window functions.
@@ -91,6 +106,7 @@ class ParsedQuery:
     tables: list[str] = field(default_factory=list)
     has_aggregates: bool = False
     has_raw_columns: bool = False
+    has_data_exposing_aggregates: bool = False
     has_subqueries: bool = False
     has_ctes: bool = False
     has_window_functions: bool = False
@@ -223,6 +239,7 @@ class SQLParser:
             result.select_expressions = list(ast.expressions)
             result.has_aggregates = self._has_aggregates(ast)
             result.has_raw_columns = self._has_raw_columns(ast)
+            result.has_data_exposing_aggregates = self._has_data_exposing_aggregates(ast)
 
         return result
 
@@ -253,6 +270,10 @@ class SQLParser:
                 )
                 result.has_window_functions = (
                     result.has_window_functions or self._has_window_functions(part)
+                )
+                result.has_data_exposing_aggregates = (
+                    result.has_data_exposing_aggregates
+                    or self._has_data_exposing_aggregates(part)
                 )
 
     def _extract_tables(self, ast: exp.Expression) -> list[str]:
@@ -341,6 +362,55 @@ class SQLParser:
             exp.GroupConcat,
         )
         return any(list(ast.find_all(agg_type)) for agg_type in aggregate_types)
+
+    def _has_data_exposing_aggregates(self, ast: exp.Expression) -> bool:
+        """Check if SELECT contains data-exposing aggregate functions.
+
+        Data-exposing aggregates (array_agg, string_agg, json_agg, any_value, etc.)
+        technically aggregate rows but return actual row data rather than computed
+        statistics, making them unsafe at AGGREGATES access level.
+
+        Args:
+            ast: Parsed AST (should be SELECT).
+
+        Returns:
+            True if data-exposing aggregate functions are present.
+        """
+        # Check for known data-exposing aggregate types that sqlglot recognizes
+        # ArrayAgg, GroupConcat are collection aggregates
+        # AnyValue, FirstValue, LastValue return arbitrary row values
+        data_exposing_types = (
+            exp.ArrayAgg,
+            exp.GroupConcat,
+            exp.AnyValue,
+            exp.FirstValue,
+            exp.LastValue,
+        )
+        if any(list(ast.find_all(agg_type)) for agg_type in data_exposing_types):
+            return True
+
+        # Check for function calls that are data-exposing aggregates by name
+        # This catches functions not recognized by sqlglot as specific types
+        for func in ast.find_all(exp.Func):
+            func_name = getattr(func, "name", "") or ""
+            if func_name.lower() in DATA_EXPOSING_AGGREGATES:
+                return True
+
+        # Also check AggFunc nodes for data-exposing function names
+        for agg in ast.find_all(exp.AggFunc):
+            # Get function name from the name attribute or class name
+            agg_name = getattr(agg, "name", "") or ""
+            # Convert class name to snake_case for matching (e.g., ArrayAgg -> array_agg)
+            if not agg_name:
+                class_name = agg.__class__.__name__
+                # Convert PascalCase to snake_case
+                agg_name = "".join(
+                    f"_{c.lower()}" if c.isupper() else c for c in class_name
+                ).lstrip("_")
+            if agg_name.lower() in DATA_EXPOSING_AGGREGATES:
+                return True
+
+        return False
 
     def _has_raw_columns(self, ast: exp.Expression) -> bool:
         """Check if SELECT contains raw column references not in aggregates.

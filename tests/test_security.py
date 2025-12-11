@@ -68,10 +68,11 @@ class TestCaseVariations:
 class TestComplexQueries:
     """Tests for complex query structures.
 
-    Design decision: Subqueries and CTEs that don't expose data in the final
-    SELECT are allowed at aggregates level. The inner query runs server-side
-    and only aggregated results are returned. This is more permissive but
-    practical for common analytics patterns.
+    Security decision: Subqueries and CTEs that contain raw columns are BLOCKED
+    at aggregates level. While COUNT(*) on a subquery doesn't directly leak data,
+    MIN/MAX on filtered subqueries can be used to extract specific row values.
+    For example: SELECT MIN(email) FROM (SELECT email FROM users WHERE id=1) sub
+    This conservative approach prevents data extraction attacks.
     """
 
     @pytest.fixture
@@ -81,28 +82,52 @@ class TestComplexQueries:
             dialect="postgresql",
         )
 
-    def test_nested_subquery_with_aggregate_outer_allowed(
+    def test_nested_subquery_with_raw_columns_blocked(
         self, gateway_aggregates: QuerySecurityGateway
     ) -> None:
-        """Test that subquery with aggregate outer SELECT is allowed.
+        """Test that subquery with raw columns is blocked.
 
-        The subquery data stays server-side; only count is returned.
+        Even though outer query uses COUNT(*), subqueries with raw columns
+        are blocked because they can be exploited with MIN/MAX to extract data.
         """
         result = gateway_aggregates.validate_query_sync(
             "SELECT COUNT(*) FROM (SELECT email FROM users) sub"
         )
-        # Outer query returns only aggregate - data doesn't leak
-        assert result.allowed
+        # Blocked: subquery has raw columns which could leak via MIN/MAX
+        assert not result.allowed
+        assert "subquery" in (result.reason or "").lower()
 
-    def test_cte_with_aggregate_outer_allowed(
+    def test_cte_with_raw_columns_blocked(
         self, gateway_aggregates: QuerySecurityGateway
     ) -> None:
-        """Test that CTE with aggregate outer SELECT is allowed."""
+        """Test that CTE with raw columns is blocked."""
         result = gateway_aggregates.validate_query_sync(
             "WITH user_emails AS (SELECT email FROM users) "
             "SELECT COUNT(*) FROM user_emails"
         )
-        # Outer query returns only aggregate
+        # Blocked: CTE has raw columns
+        assert not result.allowed
+        assert "cte" in (result.reason or "").lower()
+
+    def test_nested_subquery_with_aggregates_allowed(
+        self, gateway_aggregates: QuerySecurityGateway
+    ) -> None:
+        """Test that subquery using only aggregates is allowed."""
+        result = gateway_aggregates.validate_query_sync(
+            "SELECT SUM(cnt) FROM (SELECT COUNT(*) as cnt FROM users GROUP BY status) sub"
+        )
+        # Allowed: subquery only returns aggregates
+        assert result.allowed
+
+    def test_cte_with_aggregates_allowed(
+        self, gateway_aggregates: QuerySecurityGateway
+    ) -> None:
+        """Test that CTE using only aggregates is allowed."""
+        result = gateway_aggregates.validate_query_sync(
+            "WITH counts AS (SELECT COUNT(*) as cnt FROM users) "
+            "SELECT SUM(cnt) FROM counts"
+        )
+        # Allowed: CTE only returns aggregates
         assert result.allowed
 
     def test_union_with_raw_columns_blocked(
@@ -113,6 +138,118 @@ class TestComplexQueries:
             "SELECT COUNT(*) FROM users UNION SELECT email FROM users"
         )
         # Second part of union exposes raw columns in the RESULT SET
+        assert not result.allowed
+
+
+class TestDataExposingAggregates:
+    """Tests for blocking data-exposing aggregate functions.
+
+    These aggregate functions (array_agg, string_agg, json_agg, any_value, etc.)
+    technically aggregate rows but return actual row data rather than computed
+    statistics, making them unsafe at AGGREGATES access level.
+    """
+
+    @pytest.fixture
+    def gateway(self) -> QuerySecurityGateway:
+        return QuerySecurityGateway(
+            access_level=AccessLevel.AGGREGATES,
+            dialect="postgresql",
+        )
+
+    def test_array_agg_blocked(self, gateway: QuerySecurityGateway) -> None:
+        """Test that array_agg is blocked - returns all row values."""
+        result = gateway.validate_query_sync("SELECT array_agg(email) FROM users")
+        assert not result.allowed
+        assert "data-exposing" in (result.reason or "").lower()
+
+    def test_string_agg_blocked(self, gateway: QuerySecurityGateway) -> None:
+        """Test that string_agg is blocked - returns concatenated row values."""
+        result = gateway.validate_query_sync(
+            "SELECT string_agg(email, ',') FROM users"
+        )
+        assert not result.allowed
+
+    def test_json_agg_blocked(self, gateway: QuerySecurityGateway) -> None:
+        """Test that json_agg is blocked - returns all row data as JSON."""
+        result = gateway.validate_query_sync("SELECT json_agg(email) FROM users")
+        assert not result.allowed
+
+    def test_jsonb_agg_blocked(self, gateway: QuerySecurityGateway) -> None:
+        """Test that jsonb_agg is blocked."""
+        result = gateway.validate_query_sync("SELECT jsonb_agg(email) FROM users")
+        assert not result.allowed
+
+    def test_any_value_blocked(self, gateway: QuerySecurityGateway) -> None:
+        """Test that any_value is blocked - returns arbitrary actual row value."""
+        result = gateway.validate_query_sync("SELECT any_value(email) FROM users")
+        assert not result.allowed
+
+    def test_group_concat_blocked(self, gateway: QuerySecurityGateway) -> None:
+        """Test that group_concat is blocked (MySQL-style)."""
+        gateway_mysql = QuerySecurityGateway(
+            access_level=AccessLevel.AGGREGATES,
+            dialect="mysql",
+        )
+        result = gateway_mysql.validate_query_sync(
+            "SELECT group_concat(email) FROM users"
+        )
+        assert not result.allowed
+
+    def test_safe_aggregates_still_allowed(self, gateway: QuerySecurityGateway) -> None:
+        """Test that safe statistical aggregates are still allowed."""
+        safe_queries = [
+            "SELECT COUNT(*) FROM users",
+            "SELECT SUM(amount) FROM orders",
+            "SELECT AVG(salary) FROM employees",
+            "SELECT MIN(created_at) FROM users",
+            "SELECT MAX(updated_at) FROM users",
+            "SELECT STDDEV(salary) FROM employees",
+            "SELECT VARIANCE(amount) FROM orders",
+        ]
+        for query in safe_queries:
+            result = gateway.validate_query_sync(query)
+            assert result.allowed, f"Expected '{query}' to be allowed"
+
+
+class TestSubqueryDataExtraction:
+    """Tests for preventing data extraction via subquery + MIN/MAX attacks.
+
+    Attack pattern: SELECT MIN(email) FROM (SELECT email FROM users WHERE id=1) sub
+    This extracts the specific email for user id=1 despite using an aggregate.
+    """
+
+    @pytest.fixture
+    def gateway(self) -> QuerySecurityGateway:
+        return QuerySecurityGateway(
+            access_level=AccessLevel.AGGREGATES,
+            dialect="postgresql",
+        )
+
+    def test_min_on_filtered_subquery_blocked(
+        self, gateway: QuerySecurityGateway
+    ) -> None:
+        """Test that MIN on filtered subquery is blocked."""
+        result = gateway.validate_query_sync(
+            "SELECT MIN(email) FROM (SELECT email FROM users WHERE id = 123) sub"
+        )
+        assert not result.allowed
+
+    def test_max_on_filtered_subquery_blocked(
+        self, gateway: QuerySecurityGateway
+    ) -> None:
+        """Test that MAX on filtered subquery is blocked."""
+        result = gateway.validate_query_sync(
+            "SELECT MAX(password_hash) FROM (SELECT password_hash FROM users WHERE username = 'admin') sub"
+        )
+        assert not result.allowed
+
+    def test_binary_search_attack_blocked(
+        self, gateway: QuerySecurityGateway
+    ) -> None:
+        """Test that binary search data extraction is blocked."""
+        result = gateway.validate_query_sync(
+            "SELECT MIN(ssn) FROM (SELECT ssn FROM employees WHERE ssn > '500-00-0000') sub"
+        )
         assert not result.allowed
 
 
