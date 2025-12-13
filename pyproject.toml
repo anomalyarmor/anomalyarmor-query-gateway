@@ -1,6 +1,6 @@
 [project]
 name = "anomalyarmor-query-gateway"
-version = "1.0.0"
+version = "1.0.1"
 description = "SQL query security gateway for validating database access levels"
 readme = "README.md"
 license = { text = "Apache-2.0" }
