@@ -105,7 +105,7 @@ class TestAccessLevelComparison:
         assert AccessLevel.AGGREGATES == AccessLevel.AGGREGATES
         assert AccessLevel.SCHEMA_ONLY == AccessLevel.SCHEMA_ONLY
 
-        assert not AccessLevel.FULL == AccessLevel.AGGREGATES
+        assert AccessLevel.FULL != AccessLevel.AGGREGATES
 
     def test_string_equality_supported(self) -> None:
         """Test that string equality is supported for convenience.
@@ -120,8 +120,9 @@ class TestAccessLevelComparison:
         assert AccessLevel.SCHEMA_ONLY == "schema_only"
 
         # str == AccessLevel also works (AccessLevel is a str subclass)
-        assert "full" == AccessLevel.FULL
-        assert "aggregates" == AccessLevel.AGGREGATES
+        # Intentionally testing reverse comparison order
+        assert "full" == AccessLevel.FULL  # noqa: SIM300
+        assert "aggregates" == AccessLevel.AGGREGATES  # noqa: SIM300
 
     def test_hashable(self) -> None:
         """Test that AccessLevel is hashable for use in sets/dicts."""

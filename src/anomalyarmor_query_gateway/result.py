@@ -1,8 +1,9 @@
 """Validation result types for query security gateway."""
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from types import MappingProxyType
-from typing import Any, Mapping
+from typing import Any
 
 from .access_levels import AccessLevel
 
