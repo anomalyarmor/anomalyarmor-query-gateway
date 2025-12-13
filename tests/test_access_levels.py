@@ -149,3 +149,30 @@ class TestAccessLevelComparison:
         # schema_only > full alphabetically, but should be False by hierarchy
         assert not AccessLevel.SCHEMA_ONLY > AccessLevel.FULL
         assert AccessLevel.SCHEMA_ONLY < AccessLevel.FULL
+
+    def test_comparison_with_non_access_level_raises_type_error(self) -> None:
+        """Test that ordering comparisons with incompatible types raise TypeError.
+
+        When comparing with incompatible types like int, both sides return
+        NotImplemented which results in a TypeError.
+        """
+        import pytest
+
+        with pytest.raises(TypeError):
+            _ = AccessLevel.FULL < 123  # type: ignore[operator]
+
+        with pytest.raises(TypeError):
+            _ = AccessLevel.FULL > 123  # type: ignore[operator]
+
+        with pytest.raises(TypeError):
+            _ = AccessLevel.FULL <= 123  # type: ignore[operator]
+
+        with pytest.raises(TypeError):
+            _ = AccessLevel.FULL >= 123  # type: ignore[operator]
+
+    def test_equality_with_non_string_returns_false(self) -> None:
+        """Test equality with non-string/non-AccessLevel returns False."""
+        # Equality comparisons don't raise, they return False for incompatible types
+        assert AccessLevel.FULL != 123
+        assert AccessLevel.FULL != None  # noqa: E711
+        assert AccessLevel.FULL != ["full"]
