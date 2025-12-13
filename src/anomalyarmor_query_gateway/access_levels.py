@@ -7,15 +7,17 @@ Access levels control what types of SQL queries are permitted:
 """
 
 from enum import Enum
-from functools import total_ordering
 
 
-@total_ordering
 class AccessLevel(str, Enum):
     """Customer-configured access levels for database queries.
 
     Inherits from str for easy serialization and database storage.
     Comparison operators follow permission hierarchy (not alphabetical order).
+
+    Note: All comparison operators (__lt__, __le__, __gt__, __ge__) are
+    explicitly overridden because `str` already defines them, and we need
+    hierarchy-based comparison instead of alphabetical.
     """
 
     SCHEMA_ONLY = "schema_only"
@@ -36,22 +38,39 @@ class AccessLevel(str, Enum):
         """
         return [cls.SCHEMA_ONLY, cls.AGGREGATES, cls.FULL]
 
-    def __lt__(self, other: "AccessLevel") -> bool:
-        """Compare based on permission hierarchy, not string value.
+    def _get_hierarchy_index(self) -> int:
+        """Get index in permission hierarchy."""
+        return self.hierarchy().index(self)
 
-        Args:
-            other: Another AccessLevel to compare against.
-
-        Returns:
-            True if this level has fewer permissions than other.
-        """
+    def __lt__(self, other: object) -> bool:
+        """Compare based on permission hierarchy, not string value."""
         if not isinstance(other, AccessLevel):
             return NotImplemented
-        hierarchy = self.hierarchy()
-        return hierarchy.index(self) < hierarchy.index(other)
+        return self._get_hierarchy_index() < other._get_hierarchy_index()
+
+    def __le__(self, other: object) -> bool:
+        """Compare based on permission hierarchy, not string value."""
+        if not isinstance(other, AccessLevel):
+            return NotImplemented
+        return self._get_hierarchy_index() <= other._get_hierarchy_index()
+
+    def __gt__(self, other: object) -> bool:
+        """Compare based on permission hierarchy, not string value."""
+        if not isinstance(other, AccessLevel):
+            return NotImplemented
+        return self._get_hierarchy_index() > other._get_hierarchy_index()
+
+    def __ge__(self, other: object) -> bool:
+        """Compare based on permission hierarchy, not string value."""
+        if not isinstance(other, AccessLevel):
+            return NotImplemented
+        return self._get_hierarchy_index() >= other._get_hierarchy_index()
 
     def __eq__(self, other: object) -> bool:
         """Check equality by value.
+
+        Supports comparison with both AccessLevel and str for convenience
+        (e.g., comparing with values from database/API).
 
         Args:
             other: Object to compare against.

@@ -56,3 +56,22 @@ class TestPostgresDialectRules:
         desc = rules.system_table_description
         assert "information_schema" in desc
         assert "pg_catalog" in desc
+
+    def test_qualified_pg_prefix_user_table_not_system(self) -> None:
+        """Test that qualified pg_* tables in user schemas are not system tables.
+
+        Bug fix: A table like public.pg_custom_table should NOT be treated
+        as a system table. The pg_ prefix only indicates system tables when
+        unqualified (resolves via search_path to pg_catalog).
+        """
+        rules = PostgresDialectRules()
+        # Qualified pg_* tables in user schemas are NOT system tables
+        assert not rules.is_system_table("public.pg_custom_table")
+        assert not rules.is_system_table("myschema.pg_user_data")
+        assert not rules.is_system_table("mydb.public.pg_analytics")
+
+        # But pg_catalog.pg_* is still a system table
+        assert rules.is_system_table("pg_catalog.pg_tables")
+
+        # And unqualified pg_* is still a system table
+        assert rules.is_system_table("pg_tables")
