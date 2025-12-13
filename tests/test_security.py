@@ -399,9 +399,7 @@ class TestUnionCTESecurityBypass:
         )
         assert not result.allowed
 
-    def test_union_without_cte_still_works(
-        self, gateway: QuerySecurityGateway
-    ) -> None:
+    def test_union_without_cte_still_works(self, gateway: QuerySecurityGateway) -> None:
         """Test that UNION without CTEs still validates correctly."""
         # Aggregate-only union should be allowed
         result = gateway.validate_query_sync(
