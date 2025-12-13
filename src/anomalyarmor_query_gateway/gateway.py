@@ -9,6 +9,7 @@ from typing import Any
 
 from .access_levels import AccessLevel
 from .audit import AuditLoggerProtocol
+from .exceptions import QueryGatewayError
 from .parser import SQLParser
 from .result import ValidationResult
 from .validator import AccessValidator
@@ -97,12 +98,13 @@ class QuerySecurityGateway:
             # Validate against access level
             result = self._validator.validate(parsed)
 
-        except Exception as e:
-            # Parse or validation errors = deny the query (fail closed)
+        except QueryGatewayError as e:
+            # Expected gateway errors (parse/validation) = deny the query (fail closed)
             result = ValidationResult.deny(
                 reason=f"Query validation failed: {e!s}",
                 details={"error_type": type(e).__name__},
             )
+        # Note: Unexpected internal errors (AttributeError, KeyError, etc.) propagate
 
         # Log to audit trail (never fail validation due to logging errors)
         if self.audit_logger is not None:
@@ -138,8 +140,10 @@ class QuerySecurityGateway:
         try:
             parsed = self._parser.parse(query)
             return self._validator.validate(parsed)
-        except Exception as e:
+        except QueryGatewayError as e:
+            # Expected gateway errors (parse/validation) = deny the query (fail closed)
             return ValidationResult.deny(
                 reason=f"Query validation failed: {e!s}",
                 details={"error_type": type(e).__name__},
             )
+        # Note: Unexpected internal errors (AttributeError, KeyError, etc.) propagate

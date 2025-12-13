@@ -7,12 +7,15 @@ Access levels control what types of SQL queries are permitted:
 """
 
 from enum import Enum
+from functools import total_ordering
 
 
+@total_ordering
 class AccessLevel(str, Enum):
     """Customer-configured access levels for database queries.
 
     Inherits from str for easy serialization and database storage.
+    Comparison operators follow permission hierarchy (not alphabetical order).
     """
 
     SCHEMA_ONLY = "schema_only"
@@ -32,6 +35,39 @@ class AccessLevel(str, Enum):
             List of access levels from most restrictive to least restrictive.
         """
         return [cls.SCHEMA_ONLY, cls.AGGREGATES, cls.FULL]
+
+    def __lt__(self, other: "AccessLevel") -> bool:
+        """Compare based on permission hierarchy, not string value.
+
+        Args:
+            other: Another AccessLevel to compare against.
+
+        Returns:
+            True if this level has fewer permissions than other.
+        """
+        if not isinstance(other, AccessLevel):
+            return NotImplemented
+        hierarchy = self.hierarchy()
+        return hierarchy.index(self) < hierarchy.index(other)
+
+    def __eq__(self, other: object) -> bool:
+        """Check equality by value.
+
+        Args:
+            other: Object to compare against.
+
+        Returns:
+            True if equal.
+        """
+        if isinstance(other, AccessLevel):
+            return self.value == other.value
+        if isinstance(other, str):
+            return self.value == other
+        return NotImplemented
+
+    def __hash__(self) -> int:
+        """Return hash for use in sets/dicts."""
+        return hash(self.value)
 
     def permits(self, required_level: "AccessLevel") -> bool:
         """Check if this level permits operations requiring the given level.

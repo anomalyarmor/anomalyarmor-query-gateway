@@ -39,7 +39,10 @@ class PostgresDialectRules(BaseDialectRules):
             schema = parts[-2]
             if schema in self.SYSTEM_SCHEMAS:
                 return True
+            # For qualified names with non-system schema, it's NOT a system table
+            # even if the table name starts with pg_ (e.g., public.pg_custom_table)
+            return False
 
-        # Check for unqualified pg_* tables
+        # Check for unqualified pg_* tables (these resolve to pg_catalog via search path)
         table_name = parts[-1]
         return bool(table_name.startswith("pg_"))

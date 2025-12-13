@@ -140,8 +140,9 @@ class SQLParser:
 
         Args:
             dialect: SQL dialect name (postgresql, mysql, databricks, etc.)
+                     Whitespace is trimmed, case-insensitive.
         """
-        self.dialect = dialect.lower()
+        self.dialect = dialect.strip().lower()
         self._sqlglot_dialect = self.DIALECT_MAP.get(self.dialect, self.dialect)
 
     def parse(self, query: str) -> ParsedQuery:
@@ -218,6 +219,8 @@ class SQLParser:
         if isinstance(ast, exp.Union):
             result.has_unions = True
             result.is_select = True
+            # Check for CTEs before early return (Bug fix: Union CTE detection)
+            result.has_ctes = bool(list(ast.find_all(exp.CTE)))
             # Analyze both sides of union
             self._analyze_union(ast, result)
             return result
