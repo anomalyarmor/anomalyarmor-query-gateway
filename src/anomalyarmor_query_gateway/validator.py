@@ -125,13 +125,15 @@ class AccessValidator:
         """Validate query for AGGREGATES access level.
 
         AGGREGATES allows:
-        - Any query against system tables (schema_only subset)
+        - Raw column selection on system tables only (schema_only subset)
         - Queries with only safe aggregate functions (no raw column values)
 
-        Blocks:
-        - Raw column references in SELECT
-        - Window functions (can expose row-level data)
+        Blocks (even on system tables):
+        - Window functions (can expose row-level data in sorted/ordered format)
         - Data-exposing aggregates (array_agg, string_agg, json_agg, any_value, etc.)
+
+        Blocks (user tables only):
+        - Raw column references in SELECT
         - Subqueries that could expose raw data
 
         Args:
@@ -140,20 +142,12 @@ class AccessValidator:
         Returns:
             ValidationResult based on query structure.
         """
-        # System tables are always allowed at aggregates level
+        # Check if all tables are system tables
         all_system = all(
             self._dialect_rules.is_system_table(table) for table in parsed.tables
         )
-        if all_system and parsed.tables:
-            return ValidationResult.allow(
-                details={
-                    "access_level": "aggregates",
-                    "tables": parsed.tables,
-                    "all_system_tables": True,
-                }
-            )
 
-        # Window functions can expose row-level data
+        # Window functions can expose row-level data (blocked even on system tables)
         if parsed.has_window_functions:
             return ValidationResult.deny(
                 reason=(
@@ -170,7 +164,7 @@ class AccessValidator:
             )
 
         # Data-exposing aggregates (array_agg, string_agg, json_agg, any_value, etc.)
-        # return actual row data rather than computed statistics
+        # return actual row data rather than computed statistics (blocked even on system tables)
         if parsed.has_data_exposing_aggregates:
             examples = ", ".join(sorted(DATA_EXPOSING_AGGREGATES)[:5]) + ", etc."
             return ValidationResult.deny(
@@ -187,7 +181,18 @@ class AccessValidator:
                 },
             )
 
-        # Check for raw columns in SELECT
+        # System tables are allowed for raw column access at aggregates level
+        # (this is the schema_only subset behavior)
+        if all_system and parsed.tables:
+            return ValidationResult.allow(
+                details={
+                    "access_level": "aggregates",
+                    "tables": parsed.tables,
+                    "all_system_tables": True,
+                }
+            )
+
+        # Check for raw columns in SELECT (user tables only)
         if parsed.has_raw_columns:
             return ValidationResult.deny(
                 reason=(

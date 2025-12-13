@@ -13,6 +13,11 @@ class AccessLevel(str, Enum):
     """Customer-configured access levels for database queries.
 
     Inherits from str for easy serialization and database storage.
+    Comparison operators follow permission hierarchy (not alphabetical order).
+
+    Note: All comparison operators (__lt__, __le__, __gt__, __ge__) are
+    explicitly overridden because `str` already defines them, and we need
+    hierarchy-based comparison instead of alphabetical.
     """
 
     SCHEMA_ONLY = "schema_only"
@@ -32,6 +37,56 @@ class AccessLevel(str, Enum):
             List of access levels from most restrictive to least restrictive.
         """
         return [cls.SCHEMA_ONLY, cls.AGGREGATES, cls.FULL]
+
+    def _get_hierarchy_index(self) -> int:
+        """Get index in permission hierarchy."""
+        return self.hierarchy().index(self)
+
+    def __lt__(self, other: object) -> bool:
+        """Compare based on permission hierarchy, not string value."""
+        if not isinstance(other, AccessLevel):
+            return NotImplemented
+        return self._get_hierarchy_index() < other._get_hierarchy_index()
+
+    def __le__(self, other: object) -> bool:
+        """Compare based on permission hierarchy, not string value."""
+        if not isinstance(other, AccessLevel):
+            return NotImplemented
+        return self._get_hierarchy_index() <= other._get_hierarchy_index()
+
+    def __gt__(self, other: object) -> bool:
+        """Compare based on permission hierarchy, not string value."""
+        if not isinstance(other, AccessLevel):
+            return NotImplemented
+        return self._get_hierarchy_index() > other._get_hierarchy_index()
+
+    def __ge__(self, other: object) -> bool:
+        """Compare based on permission hierarchy, not string value."""
+        if not isinstance(other, AccessLevel):
+            return NotImplemented
+        return self._get_hierarchy_index() >= other._get_hierarchy_index()
+
+    def __eq__(self, other: object) -> bool:
+        """Check equality by value.
+
+        Supports comparison with both AccessLevel and str for convenience
+        (e.g., comparing with values from database/API).
+
+        Args:
+            other: Object to compare against.
+
+        Returns:
+            True if equal.
+        """
+        if isinstance(other, AccessLevel):
+            return self.value == other.value
+        if isinstance(other, str):
+            return self.value == other
+        return NotImplemented
+
+    def __hash__(self) -> int:
+        """Return hash for use in sets/dicts."""
+        return hash(self.value)
 
     def permits(self, required_level: "AccessLevel") -> bool:
         """Check if this level permits operations requiring the given level.

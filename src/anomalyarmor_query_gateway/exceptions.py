@@ -51,7 +51,7 @@ class QueryParseError(QueryGatewayError):
             message,
             error_code="QUERY_PARSE_ERROR",
             context={
-                "query_preview": query[:100] if query else None,
+                "query_preview": query[:100] if query is not None else None,
                 "dialect": dialect,
             },
         )
@@ -76,7 +76,7 @@ class QueryAccessDenied(QueryGatewayError):
             message,
             error_code="QUERY_ACCESS_DENIED",
             context={
-                "query_preview": query[:100] if query else None,
+                "query_preview": query[:100] if query is not None else None,
                 "access_level": access_level,
                 "required_level": required_level,
             },

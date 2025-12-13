@@ -36,7 +36,7 @@ def get_dialect_rules(dialect: str) -> BaseDialectRules:
     """Get dialect rules instance for the given dialect.
 
     Args:
-        dialect: SQL dialect name.
+        dialect: SQL dialect name (whitespace is trimmed, case-insensitive).
 
     Returns:
         Dialect rules instance.
@@ -44,11 +44,11 @@ def get_dialect_rules(dialect: str) -> BaseDialectRules:
     Raises:
         ValueError: If dialect is not supported.
     """
-    dialect_lower = dialect.lower()
-    rules_class = _DIALECT_REGISTRY.get(dialect_lower)
+    dialect_normalized = dialect.strip().lower()
+    rules_class = _DIALECT_REGISTRY.get(dialect_normalized)
     if rules_class is None:
         supported = ", ".join(sorted(set(_DIALECT_REGISTRY.keys())))
         raise ValueError(
-            f"Unsupported dialect: {dialect}. Supported dialects: {supported}"
+            f"Unsupported dialect: {dialect!r}. Supported dialects: {supported}"
         )
     return rules_class()

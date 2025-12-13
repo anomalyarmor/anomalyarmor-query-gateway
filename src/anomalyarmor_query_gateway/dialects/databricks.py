@@ -6,27 +6,35 @@ from .base import BaseDialectRules
 class DatabricksDialectRules(BaseDialectRules):
     """Databricks-specific validation rules.
 
-    System schemas (within any catalog):
-    - information_schema: SQL standard metadata
-    - system: Databricks system schema
+    In Databricks Unity Catalog:
+    - `system` is a CATALOG containing system tables (system.access.audit, etc.)
+    - `information_schema` is a SCHEMA within each catalog
 
     Databricks uses 3-level naming: catalog.schema.table
+
+    See: https://docs.databricks.com/aws/en/admin/system-tables/
     """
 
-    SYSTEM_SCHEMAS = frozenset({"information_schema", "system"})
+    # The system catalog contains all system tables
+    SYSTEM_CATALOGS = frozenset({"system"})
+    # information_schema is a schema within any catalog
+    SYSTEM_SCHEMAS = frozenset({"information_schema"})
 
     @property
     def system_table_description(self) -> str:
-        return "information_schema.*, system.* (within any catalog)"
+        return "system.*.* (system catalog), *.information_schema.* (any catalog)"
 
     def is_system_table(self, table_path: str) -> bool:
         """Check if table is a Databricks system table.
 
         Databricks uses 3-level namespace: catalog.schema.table
-        System tables can be in information_schema or system schema of any catalog.
+
+        System tables include:
+        - All tables in the `system` catalog (e.g., system.access.audit)
+        - All tables in `information_schema` schema of any catalog
 
         Args:
-            table_path: Table reference (e.g., "main.information_schema.tables").
+            table_path: Table reference (e.g., "system.access.audit").
 
         Returns:
             True if system table.
@@ -36,7 +44,12 @@ class DatabricksDialectRules(BaseDialectRules):
 
         # 3-part name: catalog.schema.table
         if len(parts) >= 3:
+            catalog = parts[0]
             schema = parts[-2]
+            # Check if catalog is the system catalog
+            if catalog in self.SYSTEM_CATALOGS:
+                return True
+            # Check if schema is information_schema
             if schema in self.SYSTEM_SCHEMAS:
                 return True
 

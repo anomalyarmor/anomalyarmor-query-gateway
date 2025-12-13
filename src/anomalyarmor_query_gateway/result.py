@@ -1,9 +1,14 @@
 """Validation result types for query security gateway."""
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
+from types import MappingProxyType
 from typing import Any
 
 from .access_levels import AccessLevel
+
+# Empty immutable mapping as default
+_EMPTY_DETAILS: MappingProxyType[str, Any] = MappingProxyType({})
 
 
 @dataclass(frozen=True)
@@ -11,18 +16,19 @@ class ValidationResult:
     """Result of query validation.
 
     Immutable dataclass representing the outcome of query validation.
+    All fields including `details` are truly immutable.
 
     Attributes:
         allowed: Whether the query is permitted.
         reason: Human-readable explanation (especially important when blocked).
         access_level_required: Minimum access level needed for this query.
-        details: Additional validation details for debugging.
+        details: Additional validation details for debugging (immutable).
     """
 
     allowed: bool
     reason: str | None = None
     access_level_required: AccessLevel | None = None
-    details: dict[str, Any] = field(default_factory=dict)
+    details: Mapping[str, Any] = field(default_factory=lambda: _EMPTY_DETAILS)
 
     @classmethod
     def allow(cls, details: dict[str, Any] | None = None) -> "ValidationResult":
@@ -34,7 +40,10 @@ class ValidationResult:
         Returns:
             ValidationResult with allowed=True.
         """
-        return cls(allowed=True, details=details or {})
+        return cls(
+            allowed=True,
+            details=MappingProxyType(details) if details else _EMPTY_DETAILS,
+        )
 
     @classmethod
     def deny(
@@ -57,7 +66,7 @@ class ValidationResult:
             allowed=False,
             reason=reason,
             access_level_required=required_level,
-            details=details or {},
+            details=MappingProxyType(details) if details else _EMPTY_DETAILS,
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -68,5 +77,5 @@ class ValidationResult:
         if self.access_level_required:
             result["access_level_required"] = self.access_level_required.value
         if self.details:
-            result["details"] = self.details
+            result["details"] = dict(self.details)
         return result

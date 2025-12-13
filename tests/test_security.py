@@ -359,6 +359,126 @@ class TestEdgeCases:
         # At minimum, we validate based on parsed content
 
 
+class TestUnionCTESecurityBypass:
+    """Tests for Union + CTE security bypass fix.
+
+    Bug: Union queries with CTEs were not detecting has_ctes=True,
+    allowing attackers to bypass AGGREGATES-level restrictions by
+    wrapping CTEs containing raw columns in a Union query.
+    """
+
+    @pytest.fixture
+    def gateway(self) -> QuerySecurityGateway:
+        return QuerySecurityGateway(
+            access_level=AccessLevel.AGGREGATES,
+            dialect="postgresql",
+        )
+
+    def test_cte_in_union_blocked(self, gateway: QuerySecurityGateway) -> None:
+        """Test that CTE with raw columns in UNION is blocked."""
+        result = gateway.validate_query_sync(
+            "WITH user_emails AS (SELECT email FROM users) "
+            "SELECT COUNT(*) FROM user_emails "
+            "UNION "
+            "SELECT COUNT(*) FROM orders"
+        )
+        assert not result.allowed
+        assert "cte" in (result.reason or "").lower()
+
+    def test_data_extraction_via_union_cte_blocked(
+        self, gateway: QuerySecurityGateway
+    ) -> None:
+        """Test that data extraction attack via CTE in UNION is blocked."""
+        result = gateway.validate_query_sync(
+            "WITH sensitive_data AS ("
+            "    SELECT email, password_hash FROM users WHERE id = 123"
+            ") "
+            "SELECT MIN(email), MIN(password_hash) FROM sensitive_data "
+            "UNION "
+            "SELECT COUNT(*), COUNT(*) FROM orders"
+        )
+        assert not result.allowed
+
+    def test_union_without_cte_still_works(self, gateway: QuerySecurityGateway) -> None:
+        """Test that UNION without CTEs still validates correctly."""
+        # Aggregate-only union should be allowed
+        result = gateway.validate_query_sync(
+            "SELECT COUNT(*) FROM users UNION SELECT COUNT(*) FROM orders"
+        )
+        assert result.allowed
+
+        # Union with raw columns should be blocked
+        result = gateway.validate_query_sync(
+            "SELECT email FROM users UNION SELECT name FROM orders"
+        )
+        assert not result.allowed
+
+
+class TestSystemTableDataExposingAggregates:
+    """Tests for data-exposing aggregates on system tables.
+
+    Bug: System tables were allowed early in validation, before checking
+    for data-exposing aggregates. This allowed attackers to use array_agg,
+    string_agg, etc. on system tables to extract data.
+    """
+
+    @pytest.fixture
+    def gateway(self) -> QuerySecurityGateway:
+        return QuerySecurityGateway(
+            access_level=AccessLevel.AGGREGATES,
+            dialect="postgresql",
+        )
+
+    def test_array_agg_on_system_table_blocked(
+        self, gateway: QuerySecurityGateway
+    ) -> None:
+        """Test that array_agg on system tables is blocked."""
+        result = gateway.validate_query_sync(
+            "SELECT array_agg(table_name) FROM information_schema.tables"
+        )
+        assert not result.allowed
+        assert "data-exposing" in (result.reason or "").lower()
+
+    def test_string_agg_on_system_table_blocked(
+        self, gateway: QuerySecurityGateway
+    ) -> None:
+        """Test that string_agg on system tables is blocked."""
+        result = gateway.validate_query_sync(
+            "SELECT string_agg(column_name, ',') FROM information_schema.columns"
+        )
+        assert not result.allowed
+
+    def test_window_function_on_system_table_blocked(
+        self, gateway: QuerySecurityGateway
+    ) -> None:
+        """Test that window functions on system tables are blocked."""
+        result = gateway.validate_query_sync(
+            "SELECT ROW_NUMBER() OVER (ORDER BY table_name) "
+            "FROM information_schema.tables"
+        )
+        assert not result.allowed
+        assert "window" in (result.reason or "").lower()
+
+    def test_safe_aggregates_on_system_table_allowed(
+        self, gateway: QuerySecurityGateway
+    ) -> None:
+        """Test that safe aggregates on system tables are still allowed."""
+        result = gateway.validate_query_sync(
+            "SELECT COUNT(*) FROM information_schema.tables"
+        )
+        assert result.allowed
+
+    def test_raw_columns_on_system_table_allowed(
+        self, gateway: QuerySecurityGateway
+    ) -> None:
+        """Test that raw column access on system tables is allowed at AGGREGATES."""
+        # This is expected behavior - system tables can expose raw columns
+        result = gateway.validate_query_sync(
+            "SELECT table_name, column_name FROM information_schema.columns"
+        )
+        assert result.allowed
+
+
 class TestFailClosed:
     """Tests verifying fail-closed behavior."""
 
