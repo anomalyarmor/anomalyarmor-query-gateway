@@ -1,0 +1,58 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 550" width="900" height="550">
+  <defs>
+    <style>
+      .box { fill: white; stroke: #10b981; stroke-width: 2; }
+      .gateway-box { fill: #f0fdf4; stroke: #10b981; stroke-width: 2; }
+      .text { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif; fill: #1e293b; }
+      .title { font-size: 15px; font-weight: 600; }
+      .subtitle { font-size: 12px; fill: #64748b; }
+      .arrow { stroke: #10b981; stroke-width: 2; fill: none; marker-end: url(#arrowhead); }
+      .label { font-size: 11px; fill: #10b981; font-weight: 500; }
+      .label-bg { fill: white; }
+    </style>
+    <marker id="arrowhead" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto">
+      <polygon points="0 0, 10 3, 0 6" fill="#10b981" />
+    </marker>
+  </defs>
+
+  <!-- AnomalyArmor Platform -->
+  <rect x="300" y="30" width="300" height="50" rx="4" class="box"/>
+  <text x="450" y="60" text-anchor="middle" class="text title">AnomalyArmor Platform</text>
+
+  <!-- Arrow down to gateway -->
+  <path d="M 450 80 L 450 130" class="arrow"/>
+
+  <!-- Query Security Gateway Container -->
+  <rect x="40" y="130" width="820" height="170" rx="4" class="gateway-box"/>
+  <text x="450" y="155" text-anchor="middle" class="text title">Query Security Gateway</text>
+
+  <!-- SQL Parser -->
+  <rect x="70" y="175" width="200" height="95" rx="4" class="box"/>
+  <text x="170" y="215" text-anchor="middle" class="text title">SQL Parser</text>
+  <text x="170" y="235" text-anchor="middle" class="text subtitle">(sqlglot)</text>
+
+  <!-- Arrow Parser -> Validator -->
+  <path d="M 270 222 L 310 222" class="arrow"/>
+
+  <!-- Access Validator -->
+  <rect x="310" y="175" width="200" height="95" rx="4" class="box"/>
+  <text x="410" y="215" text-anchor="middle" class="text title">Access Validator</text>
+  <text x="410" y="235" text-anchor="middle" class="text subtitle">(level rules)</text>
+
+  <!-- Arrow Validator -> Allow/Block -->
+  <path d="M 510 222 L 550 222" class="arrow"/>
+
+  <!-- Allow/Block + Log -->
+  <rect x="550" y="175" width="240" height="95" rx="4" class="box"/>
+  <text x="670" y="208" text-anchor="middle" class="text title">Allow / Block + Log</text>
+  <text x="670" y="228" text-anchor="middle" class="text subtitle">(audit trail)</text>
+
+  <!-- Arrow down from gateway -->
+  <path d="M 450 300 L 450 380" class="arrow"/>
+  <rect x="340" y="332" width="220" height="20" class="label-bg"/>
+  <text x="450" y="345" text-anchor="middle" class="text label">ALLOWED OPERATIONS ONLY</text>
+
+  <!-- Your Database -->
+  <rect x="300" y="380" width="300" height="50" rx="4" class="box"/>
+  <text x="450" y="410" text-anchor="middle" class="text title">Your Database</text>
+</svg>
