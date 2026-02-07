@@ -12,7 +12,7 @@ This is the **open-source SQL security layer** that AnomalyArmor uses to control
 
 ## What does it do?
 
-![Query Security Gateway Architecture](query-gateway-architecture.svg)
+![Query Security Gateway Architecture](query-gateway-architecture.png)
 
 Validates SQL queries against three access levels:
 
