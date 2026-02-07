@@ -64,7 +64,9 @@ DATA_EXPOSING_AGGREGATES = frozenset(
         "group_concat",
         "listagg",
         "json_agg",
+        "json_array_agg",  # SQL standard name, parsed by sqlglot >= 28
         "jsonb_agg",
+        "jsonb_array_agg",  # SQL standard variant
         "json_object_agg",
         "jsonb_object_agg",
         "collect_list",
@@ -409,8 +411,9 @@ class SQLParser:
             if not agg_name:
                 class_name = agg.__class__.__name__
                 # Convert PascalCase to snake_case using regex
-                # Insert underscore before uppercase letters that follow lowercase letters
-                agg_name = re.sub(r"(?<=[a-z])(?=[A-Z])", "_", class_name).lower()
+                # Handle consecutive uppercase letters (JSONArrayAgg -> json_array_agg)
+                s1 = re.sub(r"(.)([A-Z][a-z]+)", r"\1_\2", class_name)
+                agg_name = re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", s1).lower()
             if agg_name.lower() in DATA_EXPOSING_AGGREGATES:
                 return True
 
